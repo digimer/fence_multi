@@ -1,0 +1,67 @@
+-=] fence_multi ]=-
+
+ - Fence wrapper for calling multiple fence devices in a single pacemaker
+   primitive while maintaining compatibility with the FenceAgentAPI[1].
+
+Author:  Alteeve's Niche!, Madison Kelly, mkelly@alteeve.ca
+License: GPL v2+
+Version: 0.1, alpha
+ToDo:    1. Everything.
+ToDo:    2. Ensure all possible attributes for all fence agents are show in
+            the metadata.
+
+
+Purpose:
+
+This is a wrapper for other fence agents designed to simplify pacemaker
+confifurations where multiple devices need to work together for an overall
+fence action to succeed.
+
+The classic example is a setup with two PDUs powering either side of a node's
+redundant power supply.
+
+[ PDU 1 - Outlet 1 ] -> [ Node 1, PSU 1 ]
+[ PDU 2 - Outlet 1 ] -> [ Node 1, PSU 2 ]
+
+[ PDU 1 - Outlet 2 ] -> [ Node 2, PSU 1 ]
+[ PDU 2 - Outlet 2 ] -> [ Node 2, PSU 2 ]
+
+For this to work in pacemaker, you need to create four fence primitives;
+1. fence_node1_pdu1_off: pdu 1, port 1, off
+2. fence_node1_pdu2_off: pdu 2, port 1, off
+3. fence_node1_pdu1_on:  pdu 1, port 1, on
+4. fence_node1_pdu2_on:  pdu 2, port 1, on
+
+Then you need to set up these four primitives as one entry in
+'fencing_topology' as:
+
+node1: fence_node1_pdu1_off,fence_node1_pdu2_off,fence_node1_pdu1_on,fence_node1_pdu1_on
+
+Adding in the location constraints, this requires quite a substantial 
+confifuration complexity and increases the CIB by a non-trivial amount.
+
+
+Goal:
+
+The goal of this agent is to reduce this to a single fence primitive using the
+'reboot' action. It takes a special '-f, fence_agent' attribute with a value of
+
+primitive fence_node1_pdus stonith:fence_multi params \
+        fence_agent="fence_apc_snmp" ipaddr="a.pdu1,b.pdu2" port="a:1,b:1" \
+        action="reboot"
+
+Note that the 'a:' and 'b:' prefixes can be whatever you wish and simply 
+provide a link between the address and ports to work on.
+
+Behind the scenes, 'fence_multi' will first call two instances of 
+'fence_apc_snmp', one for '-a pdu1 -n 1' and one for '-a pdu2 -n 1', both with
+the '-o off'. If both of these calls succeed, then 'fence_multi' will return a
+success. Before exiting though, fence_multi will again call 'fence_apc_snmp'
+with the "on" action for each PDU.
+
+Any other attributes passed to fence_multi will be passed as-is to the 
+referenced fence_agent. So in theory, this fence wrapper should "just work"
+with all PDU fence agents (and possibly other fence agents).
+
+
+1. https://fedorahosted.org/cluster/wiki/FenceAgentAPI
